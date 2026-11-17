@@ -4,6 +4,10 @@
 
 A standalone native macOS menu-bar app that turns a dedicated Google Chrome window into a quick browser drawer. It uses your installed Chrome and its most recently active profile, including your existing sign-ins, extensions, bookmarks, and native tabs.
 
+## Install
+
+[Download TopChrome 0.1.0 for Apple silicon](https://github.com/ChaosDeSelva/TopChrome/releases/download/v0.1.0/TopChrome-0.1.0-arm64.dmg). Open the disk image and drag TopChrome into Applications. Requires macOS 14 or later and Google Chrome.
+
 ## Use
 
 Open TopChrome and click **Open Chrome Drawer**. Allow its macOS Automation request to control Google Chrome. If you have several Chrome profiles, activate a window in the profile you want before creating the drawer.
