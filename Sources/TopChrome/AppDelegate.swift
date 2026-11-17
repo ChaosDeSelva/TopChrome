@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pendingOpenURLs: [String] = []
     private var pendingSpaceChange: DispatchWorkItem?
     private let chromeVisibility = ChromeVisibility()
+    private let desktopFollower = ChromeDesktopFollower()
+    private var movingDesktop = false
+    private var desktopStatus: String?
+    private var desktopRequest = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         toolbarPanel.contentView = toolbar
@@ -77,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer?.invalidate()
         pendingResize?.cancel()
         pendingSpaceChange?.cancel()
+        cancelDesktopTransfer()
         hideControls()
         guard preferences.hidden, chrome.isRunning else { return .terminateNow }
         chrome.perform(.release(bounds: restoreBounds())) { [weak self] result in
@@ -87,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleDrawer() {
+        if movingDesktop { hideDrawer(); return }
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let isFocused = front == "com.google.Chrome" || front == Bundle.main.bundleIdentifier
         if chrome.isRunning, isFocused, chromeVisibility.isOnCurrentDesktop,
@@ -100,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func revealDrawer(opening urls: [String] = [], addingTab: Bool = false) {
         guard !busy else { return }
+        cancelDesktopTransfer()
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil else {
             showWelcome("Install Google Chrome in Applications, then open the drawer again."); return
         }
@@ -116,16 +123,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         spaceSuspended = false
         let action: ChromeAction = !urls.isEmpty ? .openURLs(urls, bounds: desiredBounds()) :
             (addingTab ? .newTab(bounds: desiredBounds()) : .show(bounds: desiredBounds()))
-        perform(action) { [weak self] in
-            self?.preferences.hidden = false
-            self?.preferences.lastVisibleBounds = self?.state?.bounds
-            self?.welcome.orderOut(nil)
-            self?.updateControls()
+        preferences.hidden = false
+        let reveal: () -> Void = { [weak self] in
+            self?.perform(action) { [weak self] in
+                self?.preferences.lastVisibleBounds = self?.state?.bounds
+                self?.welcome.orderOut(nil)
+                self?.updateControls()
+            }
+        }
+        if preferences.followAllChromeWindows, state != nil {
+            // Restore visibility without activation so Chrome cannot switch us back to its old desktop.
+            perform(.prepare(bounds: desiredBounds())) { [weak self] in
+                self?.bringDrawerHere(automatic: false, then: reveal)
+            }
+        } else { reveal() }
+    }
+
+    private func cancelDesktopTransfer() {
+        desktopRequest += 1
+        desktopFollower.cancel()
+        movingDesktop = false
+    }
+
+    private func bringDrawerHere(automatic: Bool, attempt: Int = 0, then completion: @escaping () -> Void) {
+        chromeVisibility.remember(state)
+        guard let identity = chromeVisibility.identity else {
+            if attempt < 8 {
+                let request = desktopRequest
+                movingDesktop = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
+                    guard let self, self.desktopRequest == request, !self.quitting, !self.preferences.hidden else { return }
+                    self.bringDrawerHere(automatic: automatic, attempt: attempt + 1, then: completion)
+                }
+                return
+            }
+            movingDesktop = false
+            desktopStatus = "The Chrome drawer could not be identified. Show it again to retry."
+            if !automatic { showWelcome(desktopStatus) }
+            return
+        }
+        let browserID = state?.id
+        movingDesktop = true
+        desktopFollower.bring(identity) { [weak self] outcome in
+            guard let self else { return }
+            self.movingDesktop = false
+            guard !self.quitting, !self.preferences.hidden, self.state?.id == browserID else { return }
+            switch outcome {
+            case .ready:
+                self.desktopStatus = "The drawer’s move to the current desktop was confirmed."
+                completion()
+            case .cancelled: break
+            case .unavailable, .rejected:
+                self.desktopStatus = outcome == .unavailable ?
+                    "Desktop following is unavailable here. Use a normal desktop; this macOS version must support Chrome window movement." :
+                    "macOS did not move the Chrome drawer to this desktop. Its tabs are still open."
+                self.hideControls()
+                if !automatic { self.showWelcome(self.desktopStatus) }
+            }
         }
     }
 
     private func hideDrawer() {
         guard !busy, let state else { return }
+        cancelDesktopTransfer()
         pendingResize?.cancel()
         pendingSpaceChange?.cancel()
         preferences.lastVisibleBounds = state.bounds
@@ -167,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pendingResize?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.quitting, !self.preferences.hidden, self.state?.minimized == false else { return }
-            if self.busy { self.scheduleResize(); return }
+            if self.busy || self.movingDesktop { self.scheduleResize(); return }
             self.perform(.resize(bounds: self.desiredBounds()))
         }
         pendingResize = work
@@ -212,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func poll() {
         openPendingLinks()
-        guard !busy, !polling, !quitting, !modalOpen, state != nil else { return }
+        guard !busy, !movingDesktop, !polling, !quitting, !modalOpen, state != nil else { return }
         guard chrome.isRunning else { state = nil; hideControls(); return }
         polling = true
         let generation = commandGeneration
@@ -231,9 +291,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toolbar.update(fraction: preferences.heightFraction, expanded: expanded,
                        shortcutLabel: preferences.keyBinding.display, shortcutWorks: shortcutWorks, tabs: state?.tabCount ?? 0)
         statusItem.button?.toolTip = "TopChrome · \(preferences.keyBinding.display) · right-click for controls"
-        guard let state, !preferences.hidden, state.visible, !state.minimized, state.isFront, !spaceSuspended,
+        guard let state, !preferences.hidden, state.visible, !state.minimized, state.isFront, !spaceSuspended, !movingDesktop,
               chromeVisibility.isOnCurrentDesktop,
-              let browser = DrawerGeometry.cocoaFrame(from: state.bounds, primaryHeight: primaryHeight) else { hideControls(); return }
+              let browser = DrawerGeometry.cocoaFrame(from: chromeVisibility.currentBounds ?? state.bounds,
+                                                     primaryHeight: primaryHeight) else { hideControls(); return }
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         guard front == "com.google.Chrome" || front == Bundle.main.bundleIdentifier else { hideControls(); return }
         screen = NSScreen.screens.max { $0.frame.intersection(browser).area < $1.frame.intersection(browser).area } ?? screen
@@ -253,27 +314,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func appChanged() { updateControls() }
     @objc private func spaceChanged() {
         pendingSpaceChange?.cancel()
+        cancelDesktopTransfer()
         spaceSuspended = true
         hideControls()
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.quitting else { return }
             self.spaceSuspended = false
-            if !self.busy, !self.modalOpen, !self.preferences.hidden, self.state?.visible == true,
-               self.chromeVisibility.isOnCurrentDesktop {
-                self.perform(.show(bounds: self.desiredBounds()))
+            guard !self.modalOpen, !self.preferences.hidden, self.state?.visible == true,
+                  self.state?.minimized == false else { self.updateControls(); return }
+            if self.busy { self.spaceChanged(); return }
+            let reveal = { [weak self] in
+                guard let self else { return }
+                if self.chromeVisibility.isFrontChromeWindow, let identity = self.chromeVisibility.identity,
+                   let app = NSRunningApplication(processIdentifier: identity.process), app.bundleIdentifier == "com.google.Chrome" {
+                    app.activate(options: [])
+                    self.updateControls()
+                } else { self.perform(.show(bounds: self.desiredBounds())) }
+            }
+            if self.preferences.followAllChromeWindows {
+                self.bringDrawerHere(automatic: true, then: reveal)
+            } else if self.chromeVisibility.isOnCurrentDesktop {
+                reveal()
             } else { self.poll(); self.updateControls() }
         }
         pendingSpaceChange = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
     @objc private func desktopSetup() {
         let alert = NSAlert()
-        alert.messageText = "Follow every desktop"
-        alert.informativeText = "Right-click Google Chrome in the Dock, then choose Options → Assign To → All Desktops. This macOS setting applies to all Chrome windows. Choose None to undo it.\n\nDesktop following remains unreliable on some macOS and Chrome versions, even with All Desktops selected. TopChrome cannot move Chrome between desktops independently."
-        alert.addButton(withTitle: "Done")
+        alert.messageText = "Follow Chrome across desktops"
+        alert.informativeText = "When the drawer is shown, TopChrome can bring all Google Chrome windows to your current desktop after a swipe. This includes regular Chrome windows. Tabs and page state stay open.\n\nFollowing may need an update after future macOS releases. Native full-screen Spaces are not supported.\n\n" +
+            (desktopStatus ?? (preferences.followAllChromeWindows ? "Following is enabled." : "Following is off until you enable it."))
+        alert.addButton(withTitle: preferences.followAllChromeWindows ? "Turn Off" : "Enable for All Chrome Windows")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[0].isEnabled = desktopFollower.isAvailable || preferences.followAllChromeWindows
+        modalOpen = true
+        shortcut.isEnabled = false
         NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        let response = alert.runModal()
+        modalOpen = false
+        shortcut.isEnabled = true
+        guard response == .alertFirstButtonReturn else { return }
+        preferences.followAllChromeWindows.toggle()
+        cancelDesktopTransfer()
+        if preferences.followAllChromeWindows { spaceChanged() }
     }
 
     @objc private func screensChanged() {

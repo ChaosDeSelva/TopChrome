@@ -7,6 +7,7 @@ app_dir="$project_dir/build/TopChrome.app"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 cp .build/release/TopChrome "$app_dir/Contents/MacOS/TopChrome"
 cp Resources/Info.plist "$app_dir/Contents/Info.plist"
+cp Resources/ThirdPartyNotices.txt "$app_dir/Contents/Resources/ThirdPartyNotices.txt"
 if [[ -f Resources/TopChrome.icns ]]; then
     cp Resources/TopChrome.icns "$app_dir/Contents/Resources/TopChrome.icns"
 fi

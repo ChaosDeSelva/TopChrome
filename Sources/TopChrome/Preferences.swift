@@ -32,6 +32,10 @@ final class Preferences {
         get { defaults.bool(forKey: "drawerHidden") }
         set { defaults.set(newValue, forKey: "drawerHidden") }
     }
+    var followAllChromeWindows: Bool {
+        get { defaults.bool(forKey: "followAllChromeWindows") }
+        set { defaults.set(newValue, forKey: "followAllChromeWindows") }
+    }
     var lastVisibleBounds: [Int]? {
         get { defaults.array(forKey: "lastVisibleBounds") as? [Int] }
         set { defaults.set(newValue, forKey: "lastVisibleBounds") }

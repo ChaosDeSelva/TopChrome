@@ -17,11 +17,11 @@ Open TopChrome and click **Open Chrome Drawer**. Allow its macOS Automation requ
 - Right-click the menu-bar icon for all controls.
 - **Quit TopChrome (Keep Tabs)** leaves the drawer’s Chrome window available as a normal browser window. **Close Drawer Window & Quit…** closes only that window, after confirmation.
 
-Hiding changes only the dedicated window’s visibility, keeping its tabs and page state without adding a minimized Dock tile. Showing restores that same window to the pointer’s display. Quitting TopChrome restores the window on screen. Chrome controls background-tab behavior. TopChrome never quits the whole browser or manages unrelated windows.
+Hiding changes only the dedicated window’s visibility, keeping its tabs and page state without adding a minimized Dock tile. Showing restores that same window to the pointer’s display. Quitting TopChrome restores the window on screen. Chrome controls background-tab behavior. TopChrome never quits the whole browser. Tabs outside its drawer are untouched; optional desktop following moves all Chrome windows.
 
-The drawer is a real Chrome window with a small companion toolbar. Desktop following relies on macOS: right-click **Google Chrome in the Dock → Options → Assign To → All Desktops**. This applies to **all Chrome windows**, including your regular ones. TopChrome only displays its controls when the drawer is on the current desktop; hiding keeps the drawer hidden across desktop changes. Choose **None** in Chrome's Dock menu to undo this setting.
+The drawer is a real Chrome window with a small companion toolbar. To follow normal desktop Spaces, choose **Desktop Following Setup… → Enable for All Chrome Windows**. This is opt-in because it brings **all Chrome windows**, including regular ones, to the active desktop while the drawer is shown. It preserves their tabs and live page state. Hiding the drawer suspends following; turn the option off in the same menu to stop moving Chrome.
 
-**Known limitation:** automatic desktop following is not reliable on every macOS/Chrome combination. The window can remain on its original desktop even with All Desktops selected. TopChrome cannot independently move Chrome between Spaces. This remains an open compatibility issue; show/hide and tab management work independently of it.
+Following uses the private macOS `SLSProcessAssignToSpace` interface. It moves Chrome before activation and checks that the drawer actually arrived, with a bounded wait for asynchronous window-server updates. A failed move leaves the tabs open and avoids activating Chrome on the wrong desktop. Missing interfaces, full-screen Spaces, and future macOS compatibility changes can prevent following. This approach does not require changing SIP, injecting code, or changing Chrome's persistent Dock assignment.
 
 Another app can cover the browser; press the shortcut to bring it back. Native full-screen Spaces are not supported. Full height means the usable desktop area, not macOS native full screen.
 
@@ -31,9 +31,9 @@ TopChrome accepts explicit web links through `topchrome://open?url=<encoded-http
 
 ## Privacy
 
-TopChrome has no account, telemetry, server, or project integration. It stores the height, shortcut, last window bounds, hidden state, and a random window identifier in local macOS preferences. It uses Chrome’s public AppleScript interface to manage its own window. It does not copy or read Chrome profile files, cookies, passwords, history, page content, or tab URLs. Browsing itself remains subject to Chrome and website behavior.
+TopChrome has no account, telemetry, server, or project integration. It stores the height, shortcut, following preference, last window bounds, hidden state, and a random window identifier in local macOS preferences. It uses Chrome’s public AppleScript interface to manage its drawer. With desktop following enabled, it also moves Chrome's other windows. It does not copy or read Chrome profile files, cookies, passwords, history, page content, or tab URLs. Browsing itself remains subject to Chrome and website behavior.
 
-The app requires Automation access to Google Chrome. It does not require Accessibility, Screen Recording, a browser extension, or remote debugging. Permissions can be changed in **System Settings → Privacy & Security → Automation**. It reads only process IDs and window geometry to check whether its drawer is on the active desktop. It uses public AppKit and Chrome scripting APIs; it does not modify WindowServer or change Chrome's desktop assignment automatically.
+The app requires Automation access to Google Chrome. It does not require Accessibility, Screen Recording, a browser extension, or remote debugging. Permissions can be changed in **System Settings → Privacy & Security → Automation**. Its desktop bridge reads process IDs, window geometry, and Space membership without reading window titles or images. Movement is restricted to the running Google Chrome process and requires a matching drawer window. Desktop API research is credited in [Third-party notices](Resources/ThirdPartyNotices.txt).
 
 ## Build locally
 

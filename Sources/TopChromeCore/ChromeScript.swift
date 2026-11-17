@@ -1,6 +1,7 @@
 import Foundation
 
 public enum ChromeAction {
+    case prepare(bounds: [Int])
     case show(bounds: [Int])
     case openURLs([String], bounds: [Int])
     case resize(bounds: [Int])
@@ -25,7 +26,7 @@ public enum ChromeScript {
         """
         let createsDrawer: Bool
         switch action {
-        case .show, .openURLs, .newTab: createsDrawer = true
+        case .prepare, .show, .openURLs, .newTab: createsDrawer = true
         default: createsDrawer = false
         }
         if createsDrawer {
@@ -49,6 +50,9 @@ public enum ChromeScript {
             body += "\nif (count of matches) is 0 then return {}\nset drawer to item 1 of matches\n"
         }
         switch action {
+        case .prepare(let bounds):
+            precondition(bounds.count == 4)
+            body += "\nset bounds of drawer to {\(bounds.map(String.init).joined(separator: ", "))}\nset minimized of drawer to false\nset visible of drawer to true\n"
         case .openURLs(let urls, let bounds):
             precondition(bounds.count == 4 && !urls.isEmpty)
             body += "\nset addresses to {\(urls.map(quoted).joined(separator: ", "))}\n"

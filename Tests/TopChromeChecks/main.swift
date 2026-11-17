@@ -23,12 +23,14 @@ check(browser.height + DrawerGeometry.toolbarHeight + DrawerGeometry.gripHeight 
 check(DrawerGeometry.savedFraction(.nan) == 0.5 && DrawerGeometry.savedFraction(3) == 0.95, "invalid stored heights are bounded")
 check(DrawerGeometry.cocoaFrame(from: [0, 0, 0, 1], primaryHeight: 982) == nil, "invalid Chrome rectangles are rejected")
 check(ChromeScript.quoted("a\"b\\c\nd") == "\"a\\\"b\\\\c d\"", "window identifiers are escaped as AppleScript strings")
-for action in [ChromeAction.show(bounds: [0, 40, 1512, 480]), .resize(bounds: [0, 40, 1512, 900]), .hide, .newTab(bounds: [0, 44, 1000, 500]), .inspect, .release(bounds: [0, 44, 1000, 500]), .close(bounds: [0, 44, 1000, 500])] {
+for action in [ChromeAction.prepare(bounds: [0, 40, 1512, 480]), .show(bounds: [0, 40, 1512, 480]), .resize(bounds: [0, 40, 1512, 900]), .hide, .newTab(bounds: [0, 44, 1000, 500]), .inspect, .release(bounds: [0, 44, 1000, 500]), .close(bounds: [0, 44, 1000, 500])] {
     let source = ChromeScript.source(owner: "TopChrome · test", action: action)
     check(source.contains("whose given name is \"TopChrome · test\"") && !source.contains("quit") && !source.contains("close front window"), "actions remain scoped to the owned window")
 }
 check(!ChromeScript.source(owner: "test", action: .inspect).contains("make new window"), "polling cannot create windows")
 check(!ChromeScript.source(owner: "test", action: .hide).contains("set minimized of drawer to true"), "hiding never creates a minimized Dock tile")
+let prepared = ChromeScript.source(owner: "test", action: .prepare(bounds: [0, 40, 1512, 480]))
+check(prepared.contains("set visible of drawer to true") && !prepared.contains("activate") && !prepared.contains("set index"), "restoring an existing drawer does not activate its old desktop")
 print("PASS: all core checks")
 
 func link(_ address: String) -> URL {
