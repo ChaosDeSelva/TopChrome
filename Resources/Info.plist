@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>TopChrome</string>
+<key>CFBundleDisplayName</key><string>TopChrome</string>
+<key>CFBundleIdentifier</key><string>local.topchrome.app</string>
+<key>CFBundleExecutable</key><string>TopChrome</string>
+<key>CFBundleIconFile</key><string>TopChrome</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>LSUIElement</key><true/>
+<key>CFBundleURLTypes</key><array><dict>
+<key>CFBundleURLName</key><string>local.topchrome.open</string>
+<key>CFBundleURLSchemes</key><array><string>topchrome</string></array>
+<key>CFBundleTypeRole</key><string>Viewer</string>
+</dict></array>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>TopChrome controls its dedicated Chrome window to show, hide, resize it, and open tabs using your existing Chrome profile.</string>
+</dict></plist>
