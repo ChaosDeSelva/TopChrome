@@ -6,7 +6,7 @@ A standalone native macOS menu-bar app that turns a dedicated Google Chrome wind
 
 ## Install
 
-[Download TopChrome 0.1.0 for Apple silicon](https://github.com/ChaosDeSelva/TopChrome/releases/download/v0.1.0/TopChrome-0.1.0-arm64.dmg). Open the disk image and drag TopChrome into Applications. Requires macOS 14 or later and Google Chrome.
+[Download TopChrome 0.1.1 for Apple silicon](https://github.com/ChaosDeSelva/TopChrome/releases/download/v0.1.1/TopChrome-0.1.1-arm64.dmg). Open the disk image and drag TopChrome into Applications. Requires macOS 14 or later and Google Chrome.
 
 ## Use
 
