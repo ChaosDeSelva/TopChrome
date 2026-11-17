@@ -51,8 +51,7 @@ public enum ChromeScript {
         }
         switch action {
         case .prepare(let bounds):
-            precondition(bounds.count == 4)
-            body += "\nset bounds of drawer to {\(bounds.map(String.init).joined(separator: ", "))}\nset minimized of drawer to false\nset visible of drawer to true\n"
+            body += restore(bounds: bounds)
         case .openURLs(let urls, let bounds):
             precondition(bounds.count == 4 && !urls.isEmpty)
             body += "\nset addresses to {\(urls.map(quoted).joined(separator: ", "))}\n"
@@ -66,31 +65,39 @@ public enum ChromeScript {
                 end if
             end repeat
             set active tab index of drawer to count of tabs of drawer
-            set bounds of drawer to {\(bounds.map(String.init).joined(separator: ", "))}
-            set minimized of drawer to false
-            set visible of drawer to true
-            set index of drawer to 1
-            activate
-
             """
+            body += restore(bounds: bounds) + raise()
         case .show(let bounds), .resize(let bounds):
-            precondition(bounds.count == 4)
-            body += "\nset bounds of drawer to {\(bounds.map(String.init).joined(separator: ", "))}\n"
+            body += resize(bounds: bounds)
             if case .show = action {
-                body += "set minimized of drawer to false\nset visible of drawer to true\nset index of drawer to 1\nactivate\n"
+                body += restoreVisibility + raise()
             }
         case .hide:
-            body += "\nset visible of drawer to false\n"
+            body += "\nif visible of drawer then set visible of drawer to false\n"
         case .newTab(let bounds):
             body += "\nif not createdDrawer then make new tab at end of tabs of drawer\nset active tab index of drawer to count of tabs of drawer\n"
-            body += "set bounds of drawer to {\(bounds.map(String.init).joined(separator: ", "))}\nset minimized of drawer to false\nset visible of drawer to true\nset index of drawer to 1\nactivate\n"
+            body += restore(bounds: bounds) + raise()
         case .release(let bounds):
-            body += "\nset bounds of drawer to {\(bounds.map(String.init).joined(separator: ", "))}\nset minimized of drawer to false\nset visible of drawer to true\nreturn {}\n"
+            body += restore(bounds: bounds) + "return {}\n"
         case .close(let bounds):
-            body += "\nset bounds of drawer to {\(bounds.map(String.init).joined(separator: ", "))}\nset minimized of drawer to false\nset visible of drawer to true\nclose drawer\nreturn {}\n"
+            body += restore(bounds: bounds) + "close drawer\nreturn {}\n"
         case .inspect: break
         }
         body += "\nreturn {id of drawer, minimized of drawer, bounds of drawer, count of tabs of drawer, id of front window, visible of drawer}\n"
         return "with timeout of 12 seconds\ntell application id \"com.google.Chrome\"\n" + body + "\nend tell\nend timeout"
+    }
+
+    private static func resize(bounds: [Int]) -> String {
+        precondition(bounds.count == 4)
+        let rectangle = "{\(bounds.map(String.init).joined(separator: ", "))}"
+        return "\nif bounds of drawer is not \(rectangle) then set bounds of drawer to \(rectangle)\n"
+    }
+
+    private static let restoreVisibility = "if minimized of drawer then set minimized of drawer to false\nif not visible of drawer then set visible of drawer to true\n"
+
+    private static func restore(bounds: [Int]) -> String { resize(bounds: bounds) + restoreVisibility }
+
+    private static func raise() -> String {
+        "if id of front window is not id of drawer then set index of drawer to 1\nif not frontmost then activate\n"
     }
 }

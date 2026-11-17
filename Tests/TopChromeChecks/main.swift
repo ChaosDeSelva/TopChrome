@@ -31,6 +31,15 @@ check(!ChromeScript.source(owner: "test", action: .inspect).contains("make new w
 check(!ChromeScript.source(owner: "test", action: .hide).contains("set minimized of drawer to true"), "hiding never creates a minimized Dock tile")
 let prepared = ChromeScript.source(owner: "test", action: .prepare(bounds: [0, 40, 1512, 480]))
 check(prepared.contains("set visible of drawer to true") && !prepared.contains("activate") && !prepared.contains("set index"), "restoring an existing drawer does not activate its old desktop")
+for action in [ChromeAction.show(bounds: [0, 40, 1512, 480]), .newTab(bounds: [0, 40, 1512, 480]), .openURLs(["https://example.com"], bounds: [0, 40, 1512, 480])] {
+    let source = ChromeScript.source(owner: "test", action: action)
+    let mutations = source.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter {
+        $0.contains("set bounds of drawer") || $0.contains("set visible of drawer") ||
+        $0.contains("set minimized of drawer") || $0.contains("set index of drawer") || $0.contains("activate")
+    }
+    check(mutations.count == 5 && mutations.allSatisfy { $0.hasPrefix("if ") && $0.contains(" then ") },
+          "show and tab commands guard every resize, visibility, ordering, and activation mutation")
+}
 print("PASS: all core checks")
 
 func link(_ address: String) -> URL {

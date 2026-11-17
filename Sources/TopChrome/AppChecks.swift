@@ -39,6 +39,8 @@ enum AppChecks {
             let linkScript = NSAppleScript(source: ChromeScript.source(owner: "TopChrome · compile check", action: .openURLs(["https://example.com/?q=%22hello%22&x=1#part"], bounds: [0, 44, 1000, 500])))!
             try check(linkScript.compileAndReturnError(&linkError), "link-opening command compiles: \(String(describing: linkError))")
             try checkDesktopFollowing()
+            try checkControlPresentation()
+            try checkControlSettling()
             print("PASS: all app checks; no Chrome commands executed")
             return 0
         } catch { print("FAIL: \(error.localizedDescription)"); return 1 }
@@ -65,6 +67,12 @@ enum AppChecks {
         pending.removeFirst()()
         try check(results == [.ready], "delayed window-server confirmation permits activation")
 
+        results = []
+        let settledAssignments = assignments
+        follower.bring(window) { results.append($0) }
+        try check(results == [.ready] && assignments == settledAssignments && pending.isEmpty,
+                  "an already settled drawer is not moved again")
+
         results = []; landed = false
         follower.bring(window) { results.append($0) }
         follower.cancel()
@@ -90,6 +98,61 @@ enum AppChecks {
         results = []; belongsToChrome = true; desktop = nil
         follower.bring(window) { results.append($0) }
         try check(results == [.unavailable] && assignments == previousAssignments, "full-screen or unknown desktops prevent process movement")
+    }
+
+    private static func checkControlPresentation() throws {
+        let panel = RecordingPanel(title: "Presentation check")
+        let frame = NSRect(x: 0, y: 500, width: 1200, height: 44)
+        panel.present(at: frame)
+        let initialFrames = panel.frameChanges
+        for _ in 0..<30 { panel.present(at: frame) }
+        try check(panel.orderedIn == 1 && panel.frameChanges == initialFrames,
+                  "unchanged polls do not raise or reposition visible controls")
+        panel.present(at: frame.offsetBy(dx: 0, dy: 100))
+        try check(panel.orderedIn == 1 && panel.frameChanges == initialFrames + 1,
+                  "resizing repositions controls without raising them again")
+        panel.dismiss()
+        panel.dismiss()
+        try check(panel.orderedOut == 1, "repeated transition updates hide controls only once")
+        panel.present(at: frame.offsetBy(dx: 0, dy: 100))
+        try check(panel.orderedIn == 2 && panel.frameChanges == initialFrames + 1,
+                  "showing settled controls raises them once without resizing")
+    }
+
+    private static func checkControlSettling() throws {
+        var pending: [() -> Void] = []
+        var nativeWindowVisible = false
+        var hides = 0
+        let settler = ControlSettler(later: { pending.append($0) })
+        let refresh = { if !nativeWindowVisible { hides += 1 } }
+        for _ in 0..<10 { settler.recheck(refresh) }
+        try check(pending.count == 1 && hides == 0, "transient native updates coalesce without immediately hiding the wrapper")
+        nativeWindowVisible = true
+        pending.removeFirst()()
+        try check(hides == 0, "a recovered Chrome window keeps the wrapper visible without waiting for another poll")
+        nativeWindowVisible = false
+        settler.recheck(refresh)
+        pending.removeFirst()()
+        try check(hides == 1, "a genuinely absent Chrome window hides the wrapper after one recheck")
+        settler.recheck(refresh)
+        settler.cancel()
+        nativeWindowVisible = false
+        pending.removeFirst()()
+        try check(hides == 1, "explicit show, hide, and newer transitions cancel stale wrapper updates")
+    }
+
+    private final class RecordingPanel: ControlPanel {
+        var shown = false
+        var frameChanges = 0
+        var orderedIn = 0
+        var orderedOut = 0
+        override var isVisible: Bool { shown }
+        override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+            frameChanges += 1
+            super.setFrame(frameRect, display: false)
+        }
+        override func orderFrontRegardless() { orderedIn += 1; shown = true }
+        override func orderOut(_ sender: Any?) { orderedOut += 1; shown = false }
     }
 }
 #endif

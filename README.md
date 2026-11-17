@@ -58,7 +58,9 @@ swift build --disable-sandbox
 .build/debug/TopChrome --self-test
 ```
 
-Core checks cover sizing, display coordinate conversion, invalid preferences, escaped window identifiers, and command scope. App checks cover preference persistence, shortcut conflicts, and compilation of all Chrome commands without executing them. Live review should also exercise show/hide, tab preservation, resizing, shortcut recording, external window closure, relaunch, and leaving unrelated Chrome windows alone.
+Core checks cover sizing, display coordinate conversion, invalid preferences, escaped window identifiers, command scope, and conditional window mutations. App checks cover preference persistence, shortcut conflicts, command compilation, desktop movement cancellation, and control visibility during transient window updates. They do not execute Chrome commands or display test panels.
+
+Before publishing, open and hide the signed app repeatedly, add tabs using both its toolbar and Chrome's shortcut, and swipe between normal desktops. The surrounding controls should appear once on opening, stay steady during tab changes, and disappear once on hiding. Also check tab preservation, resizing, shortcut recording, external window closure, relaunch, and unrelated Chrome windows. Automated checks do not measure live macOS animation smoothness.
 
 ## Source layout
 

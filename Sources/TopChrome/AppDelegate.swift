@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var screen: NSScreen?
     private var expanded = false
     private var busy = false
+    private var revealingDrawer = false
     private var polling = false
     private var commandGeneration = 0
     private var shortcutWorks = false
@@ -27,8 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var ready = false
     private var pendingOpenURLs: [String] = []
     private var pendingSpaceChange: DispatchWorkItem?
+    private var pendingControlRefresh: DispatchWorkItem?
+    private var pollFailures = 0
     private let chromeVisibility = ChromeVisibility()
     private let desktopFollower = ChromeDesktopFollower()
+    private let controlSettler = ControlSettler()
     private var movingDesktop = false
     private var desktopStatus: String?
     private var desktopRequest = 0
@@ -81,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer?.invalidate()
         pendingResize?.cancel()
         pendingSpaceChange?.cancel()
+        pendingControlRefresh?.cancel()
         cancelDesktopTransfer()
         hideControls()
         guard preferences.hidden, chrome.isRunning else { return .terminateNow }
@@ -95,8 +100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if movingDesktop { hideDrawer(); return }
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let isFocused = front == "com.google.Chrome" || front == Bundle.main.bundleIdentifier
-        if chrome.isRunning, isFocused, chromeVisibility.isOnCurrentDesktop,
-           !preferences.hidden, state?.isFront == true, state?.visible == true, state?.minimized == false { hideDrawer() }
+        if chrome.isRunning, isFocused, chromeVisibility.isFrontChromeWindow,
+           !preferences.hidden, state?.visible == true, state?.minimized == false { hideDrawer() }
         else { showDrawer() }
     }
 
@@ -110,8 +115,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil else {
             showWelcome("Install Google Chrome in Applications, then open the drawer again."); return
         }
+        revealingDrawer = true
         let front = NSWorkspace.shared.frontmostApplication
-        if front?.bundleIdentifier != Bundle.main.bundleIdentifier { previousApp = front }
+        if front?.bundleIdentifier != Bundle.main.bundleIdentifier, front?.bundleIdentifier != "com.google.Chrome" { previousApp = front }
         screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         if state == nil, chrome.isRunning {
             perform(.inspect) { [weak self] in self?.revealKnownDrawer(opening: urls, addingTab: addingTab) }
@@ -126,12 +132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         preferences.hidden = false
         let reveal: () -> Void = { [weak self] in
             self?.perform(action) { [weak self] in
+                self?.revealingDrawer = false
                 self?.preferences.lastVisibleBounds = self?.state?.bounds
                 self?.welcome.orderOut(nil)
                 self?.updateControls()
             }
         }
-        if preferences.followAllChromeWindows, state != nil {
+        if preferences.followAllChromeWindows, state != nil, !chromeVisibility.isOnCurrentDesktop {
             // Restore visibility without activation so Chrome cannot switch us back to its old desktop.
             perform(.prepare(bounds: desiredBounds())) { [weak self] in
                 self?.bringDrawerHere(automatic: false, then: reveal)
@@ -142,11 +149,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func cancelDesktopTransfer() {
         desktopRequest += 1
         desktopFollower.cancel()
+        pendingControlRefresh?.cancel()
         movingDesktop = false
     }
 
     private func bringDrawerHere(automatic: Bool, attempt: Int = 0, then completion: @escaping () -> Void) {
         chromeVisibility.remember(state)
+        if chromeVisibility.isOnCurrentDesktop { movingDesktop = false; completion(); return }
         guard let identity = chromeVisibility.identity else {
             if attempt < 8 {
                 let request = desktopRequest
@@ -158,22 +167,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
             movingDesktop = false
+            revealingDrawer = false
             desktopStatus = "The Chrome drawer could not be identified. Show it again to retry."
             if !automatic { showWelcome(desktopStatus) }
             return
         }
         let browserID = state?.id
+        let request = desktopRequest
         movingDesktop = true
         desktopFollower.bring(identity) { [weak self] outcome in
-            guard let self else { return }
+            guard let self, self.desktopRequest == request else { return }
             self.movingDesktop = false
             guard !self.quitting, !self.preferences.hidden, self.state?.id == browserID else { return }
             switch outcome {
             case .ready:
                 self.desktopStatus = "The drawer’s move to the current desktop was confirmed."
                 completion()
-            case .cancelled: break
+            case .cancelled: self.revealingDrawer = false
             case .unavailable, .rejected:
+                self.revealingDrawer = false
                 self.desktopStatus = outcome == .unavailable ?
                     "Desktop following is unavailable here. Use a normal desktop; this macOS version must support Chrome window movement." :
                     "macOS did not move the Chrome drawer to this desktop. Its tabs are still open."
@@ -185,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func hideDrawer() {
         guard !busy, let state else { return }
+        revealingDrawer = false
         cancelDesktopTransfer()
         pendingResize?.cancel()
         pendingSpaceChange?.cancel()
@@ -258,11 +271,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.welcome.setStatus(nil, busy: false)
             switch result {
             case .success(let value):
+                self.pollFailures = 0
                 self.state = value
                 self.chromeVisibility.remember(value)
                 self.updateControls()
                 completed?()
             case .failure(let error):
+                self.revealingDrawer = false
                 self.preferences.hidden = false
                 self.hideControls()
                 self.showWelcome(error.localizedDescription, permissionDenied: (error as? ChromeFailure)?.code == -1743)
@@ -272,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func poll() {
         openPendingLinks()
-        guard !busy, !movingDesktop, !polling, !quitting, !modalOpen, state != nil else { return }
+        guard !busy, !movingDesktop, !spaceSuspended, !polling, !quitting, !modalOpen, state != nil else { return }
         guard chrome.isRunning else { state = nil; hideControls(); return }
         polling = true
         let generation = commandGeneration
@@ -281,30 +296,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.polling = false
             guard generation == self.commandGeneration else { return }
             switch result {
-            case .success(let value): self.state = value; self.chromeVisibility.remember(value); self.updateControls()
-            case .failure: self.state = nil; self.hideControls()
+            case .success(let value):
+                self.pollFailures = 0
+                self.state = value
+                self.chromeVisibility.remember(value)
+                self.updateControls()
+            case .failure:
+                self.pollFailures += 1
+                if self.pollFailures >= 3 || !self.chromeVisibility.isOnCurrentDesktop { self.hideControls() }
             }
         }
     }
 
-    private func updateControls() {
+    private func updateControls(deferHiding: Bool = true) {
         toolbar.update(fraction: preferences.heightFraction, expanded: expanded,
                        shortcutLabel: preferences.keyBinding.display, shortcutWorks: shortcutWorks, tabs: state?.tabCount ?? 0)
         statusItem.button?.toolTip = "TopChrome · \(preferences.keyBinding.display) · right-click for controls"
-        guard let state, !preferences.hidden, state.visible, !state.minimized, state.isFront, !spaceSuspended, !movingDesktop,
-              chromeVisibility.isOnCurrentDesktop,
-              let browser = DrawerGeometry.cocoaFrame(from: chromeVisibility.currentBounds ?? state.bounds,
-                                                     primaryHeight: primaryHeight) else { hideControls(); return }
+        guard let state, !preferences.hidden, !quitting else { hideControls(); return }
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         guard front == "com.google.Chrome" || front == Bundle.main.bundleIdentifier else { hideControls(); return }
+        if revealingDrawer || busy || spaceSuspended || movingDesktop { controlSettler.cancel(); return }
+        guard state.visible, !state.minimized,
+              chromeVisibility.isFrontChromeWindow,
+              let browser = DrawerGeometry.cocoaFrame(from: chromeVisibility.currentBounds ?? state.bounds,
+                                                     primaryHeight: primaryHeight) else {
+            if deferHiding {
+                controlSettler.recheck { [weak self] in self?.updateControls(deferHiding: false) }
+            } else { hideControls() }
+            return
+        }
+        controlSettler.cancel()
         screen = NSScreen.screens.max { $0.frame.intersection(browser).area < $1.frame.intersection(browser).area } ?? screen
-        toolbarPanel.setFrame(NSRect(x: browser.minX, y: browser.maxY, width: browser.width, height: DrawerGeometry.toolbarHeight), display: true)
-        gripPanel.setFrame(NSRect(x: browser.minX, y: browser.minY - DrawerGeometry.gripHeight, width: browser.width, height: DrawerGeometry.gripHeight), display: true)
-        toolbarPanel.orderFrontRegardless()
-        gripPanel.orderFrontRegardless()
+        toolbarPanel.present(at: NSRect(x: browser.minX, y: browser.maxY, width: browser.width, height: DrawerGeometry.toolbarHeight))
+        gripPanel.present(at: NSRect(x: browser.minX, y: browser.minY - DrawerGeometry.gripHeight, width: browser.width, height: DrawerGeometry.gripHeight))
     }
 
-    private func hideControls() { toolbarPanel.orderOut(nil); gripPanel.orderOut(nil) }
+    private func hideControls() { controlSettler.cancel(); toolbarPanel.dismiss(); gripPanel.dismiss() }
     private func showWelcome(_ error: String? = nil, permissionDenied: Bool = false) {
         welcome.setStatus(error, busy: busy, permissionDenied: permissionDenied)
         NSApp.activate(ignoringOtherApps: true)
@@ -315,21 +342,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func spaceChanged() {
         pendingSpaceChange?.cancel()
         cancelDesktopTransfer()
+        revealingDrawer = false
+        commandGeneration += 1
         spaceSuspended = true
-        hideControls()
+        if !chromeVisibility.isOnCurrentDesktop { hideControls() }
+        finishSpaceChange(request: desktopRequest)
+    }
+
+    private func finishSpaceChange(request: Int) {
         let work = DispatchWorkItem { [weak self] in
-            guard let self, !self.quitting else { return }
+            guard let self, !self.quitting, self.desktopRequest == request else { return }
+            if self.busy || self.movingDesktop { self.finishSpaceChange(request: request); return }
             self.spaceSuspended = false
             guard !self.modalOpen, !self.preferences.hidden, self.state?.visible == true,
                   self.state?.minimized == false else { self.updateControls(); return }
-            if self.busy { self.spaceChanged(); return }
             let reveal = { [weak self] in
                 guard let self else { return }
-                if self.chromeVisibility.isFrontChromeWindow, let identity = self.chromeVisibility.identity,
+                let awaitingVisibility = !self.chromeVisibility.isOnCurrentDesktop && self.state?.isFront == true
+                if (self.chromeVisibility.isFrontChromeWindow || awaitingVisibility), let identity = self.chromeVisibility.identity,
                    let app = NSRunningApplication(processIdentifier: identity.process), app.bundleIdentifier == "com.google.Chrome" {
-                    app.activate(options: [])
-                    self.updateControls()
-                } else { self.perform(.show(bounds: self.desiredBounds())) }
+                    if NSWorkspace.shared.frontmostApplication?.processIdentifier != identity.process { app.activate(options: []) }
+                    self.refreshControlsAfterMove(request: request)
+                } else {
+                    self.perform(.show(bounds: self.desiredBounds())) { [weak self] in self?.refreshControlsAfterMove(request: request) }
+                }
             }
             if self.preferences.followAllChromeWindows {
                 self.bringDrawerHere(automatic: true, then: reveal)
@@ -339,6 +375,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         pendingSpaceChange = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+    }
+
+    private func refreshControlsAfterMove(request: Int, attempt: Int = 0) {
+        guard request == desktopRequest, !quitting, !preferences.hidden else { return }
+        updateControls()
+        guard !chromeVisibility.isOnCurrentDesktop, attempt < 20 else { return }
+        // Desktop membership can settle before the window appears in the on-screen list.
+        let work = DispatchWorkItem { [weak self] in self?.refreshControlsAfterMove(request: request, attempt: attempt + 1) }
+        pendingControlRefresh = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: work)
     }
 
     @objc private func desktopSetup() {

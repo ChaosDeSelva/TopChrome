@@ -1,7 +1,7 @@
 import AppKit
 import TopChromeCore
 
-final class ControlPanel: NSPanel {
+class ControlPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
     init(title: String) {
@@ -21,6 +21,15 @@ final class ControlPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         animationBehavior = .none
     }
+
+    func present(at frame: NSRect) {
+        if self.frame != frame { setFrame(frame, display: true) }
+        if !isVisible { orderFrontRegardless() }
+    }
+
+    func dismiss() {
+        if isVisible { orderOut(nil) }
+    }
 }
 
 final class DrawerToolbar: NSView {
@@ -36,6 +45,15 @@ final class DrawerToolbar: NSView {
     var onHeight: ((NSView) -> Void)?
     var onExpand: (() -> Void)?
     var onHide: (() -> Void)?
+    private var rendered: Content?
+
+    private struct Content: Equatable {
+        let fraction: Double
+        let expanded: Bool
+        let shortcutLabel: String
+        let shortcutWorks: Bool
+        let tabs: Int
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -74,12 +92,18 @@ final class DrawerToolbar: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func update(fraction: Double, expanded: Bool, shortcutLabel: String, shortcutWorks: Bool, tabs: Int) {
+        let content = Content(fraction: fraction, expanded: expanded, shortcutLabel: shortcutLabel, shortcutWorks: shortcutWorks, tabs: tabs)
+        guard rendered != content else { return }
+        let previous = rendered
+        rendered = content
         detail.stringValue = "\(tabs) \(tabs == 1 ? "tab" : "tabs") · Chrome profile"
         shortcut.title = shortcutWorks ? "\(shortcutLabel)  show / hide" : "Set shortcut…"
         height.title = expanded ? "100%" : "\(Int((fraction * 100).rounded()))%"
-        expand.image = NSImage(systemSymbolName: expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                               accessibilityDescription: expanded ? "Restore saved height" : "Full height")
-        expand.toolTip = expanded ? "Restore saved height" : "Full available height"
+        if previous?.expanded != expanded {
+            expand.image = NSImage(systemSymbolName: expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                                   accessibilityDescription: expanded ? "Restore saved height" : "Full height")
+            expand.toolTip = expanded ? "Restore saved height" : "Full available height"
+        }
         hide.toolTip = "Hide Chrome drawer (\(shortcutLabel))"
     }
 
